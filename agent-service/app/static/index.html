@@ -1,1 +1,199 @@
-<h1>Mini-Sparky</h1>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mini-Sparky</title>
+    <style>
+        body { font: 14px system-ui, sans-serif; margin: 0; background: #f4f5f7; color: #1d1d1f; }
+        header { background: #0071dc; color: #fff; padding: 10px 16px; font-weight: 600; }
+        header small { font-weight: 400; margin-left: 12px; opacity: .85; }
+        main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; height: calc(100vh - 62px); box-sizing: border-box; }
+        section { background: #fff; border-radius: 8px; padding: 12px; overflow: auto; }
+        #chatbox { display: flex; flex-direction: column; }
+        #chat { flex: 1; overflow: auto; }
+        #right { display: grid; grid-template-rows: auto 1fr 1fr; gap: 12px; overflow: hidden; }
+        h3 { margin: 0 0 8px; } h3 small { font-weight: 400; color: #666; }
+        .msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; max-width: 90%; }
+        .msg.user { background: #dbeafe; margin-left: auto; } .msg.bot { background: #eef0f3; }
+        .row { display: flex; gap: 8px; margin-top: 8px; }
+        input { flex: 1; padding: 8px; }
+        button { padding: 8px 12px; cursor: pointer; }
+        button:disabled { opacity: .45; cursor: not-allowed; }
+        #pay { background: #2a8703; color: #fff; border: 0; border-radius: 4px; font-weight: 600; }
+        .line { padding: 2px 0; } .total { font-weight: 600; margin-top: 6px; }
+        .chip { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; color: #fff; background: #888; }
+        .chip.ALLOWED { background: #2a8703; } .chip.BLOCKED { background: #c62828; }
+        .chip.REJECTED, .chip.ERROR { background: #b26a00; }
+        pre { margin: 4px 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; background: #f4f5f7; padding: 6px; }
+        summary { cursor: pointer; padding: 2px 0; }
+    </style>
+</head>
+<body>
+<header>Mini-Sparky <small id="meta"></small></header>
+<main>
+    <section id="chatbox">
+        <div id="chat"></div>
+        <div class="row">
+            <input id="input" placeholder="e.g. Plan a cookout for 8 people under Rs 3000" autocomplete="off">
+            <button id="send">Send</button>
+        </div>
+    </section>
+    <div id="right">
+        <section>
+            <h3>Cart <small id="expiry"></small></h3>
+            <div id="cart">Empty</div>
+            <div class="row">
+                <button id="pay" disabled>Confirm &amp; Pay</button>
+                <button id="retry" disabled>Retry same request (debug)</button>
+                <button id="cancel" disabled>Cancel cart</button>
+            </div>
+        </section>
+        <section><h3>Agent trace</h3><div id="trace"></div></section>
+        <section><h3>Audit log</h3><div id="audit"></div></section>
+    </div>
+</main>
+<script>
+    const CORE = "http://localhost:8080";
+    let session = null, cart = null, lastKey = null, payBusy = false, chatBusy = false;
+
+    const $ = (id) => document.getElementById(id);
+    const rs = (p) => "Rs " + (p / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;   // textContent only: model/product text is untrusted
+        return e;
+    }
+    function addMsg(who, text) {
+        $("chat").appendChild(el("div", "msg " + who, text));
+        $("chat").scrollTop = $("chat").scrollHeight;
+    }
+    const userHeaders = () => ({ "X-User-Token": session.userToken });
+
+    function renderCart(c) {
+        cart = c || null;
+        const box = $("cart");
+        box.replaceChildren();
+        if (!c || c.items.length === 0) {
+            box.textContent = "Empty";
+        } else {
+            c.items.forEach(i => box.appendChild(el("div", "line", `${i.qty} x ${i.name} (${i.sku}) - ${rs(i.linePaise)}`)));
+            box.appendChild(el("div", "total", `Total ${rs(c.totalPaise)} | Remaining budget ${rs(c.remainingBudgetPaise)}`));
+        }
+        const open = c && c.status === "OPEN" && c.items.length > 0;
+        $("pay").disabled = !open || payBusy;
+        $("cancel").disabled = !(c && c.status === "OPEN");
+        $("retry").disabled = !lastKey || !c;
+    }
+
+    function renderTrace(list) {
+        const box = $("trace");
+        box.replaceChildren();
+        list.forEach(t => {
+            const d = el("details");
+            const s = el("summary");
+            s.appendChild(el("span", "chip " + t.status, t.status));
+            s.appendChild(document.createTextNode(" " + t.name + " " + JSON.stringify(t.args)));
+            d.appendChild(s);
+            d.appendChild(el("pre", "", t.result));
+            box.appendChild(d);
+        });
+    }
+
+    async function refreshAudit() {
+        const r = await fetch(`${CORE}/api/audit?sessionId=${session.sessionId}`, { headers: userHeaders() });
+        if (!r.ok) return;
+        const box = $("audit");
+        box.replaceChildren();
+        (await r.json()).slice(0, 40).forEach(a => {
+            const d = el("div", "line");
+            d.appendChild(el("span", "chip " + a.decision, a.decision));
+            d.appendChild(document.createTextNode(` ${a.actor} ${a.action} ${a.sku || ""} ${a.reason || ""}`));
+            box.appendChild(d);
+        });
+    }
+
+    async function refreshCart() {
+        if (!cart) return;
+        const r = await fetch(`${CORE}/api/carts/${cart.cartId}`, { headers: userHeaders() });
+        if (r.ok) renderCart(await r.json());
+    }
+
+    async function send() {
+        const text = $("input").value.trim();
+        if (!text || chatBusy) return;
+        $("input").value = "";
+        addMsg("user", text);
+        chatBusy = true;
+        $("send").disabled = true;
+        $("meta").textContent = "thinking...";
+        try {
+            const r = await fetch("/chat", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId: session.sessionId, message: text })
+            });
+            const data = await r.json();
+            if (!r.ok) { addMsg("bot", "Error: " + (data.detail || r.status)); $("meta").textContent = ""; return; }
+            addMsg("bot", data.reply);
+            renderCart(data.cart);
+            renderTrace(data.toolTrace);
+            const m = data.meta;
+            $("meta").textContent = `${m.model} | ${m.llmCalls} LLM calls | ${m.promptTokens + m.completionTokens} tokens | ${m.latencyMs} ms`;
+            refreshAudit();
+        } catch (e) {
+            addMsg("bot", "Network error: " + e);
+        } finally {
+            chatBusy = false;
+            $("send").disabled = false;
+        }
+    }
+
+    async function pay(reuseKey) {
+        if (!cart || payBusy) return;
+        if (!reuseKey || !lastKey) lastKey = crypto.randomUUID();   // one key per purchase attempt
+        payBusy = true;
+        $("pay").disabled = true;
+        try {
+            const r = await fetch(`${CORE}/api/carts/${cart.cartId}/checkout`,
+                { method: "POST", headers: { ...userHeaders(), "Idempotency-Key": lastKey } });
+            const d = await r.json();
+            addMsg("bot", r.ok ? `Order placed. Order id ${d.orderId}, total ${rs(d.totalPaise)}.`
+                : `Checkout blocked: ${d.code} - ${d.message}`);
+        } finally {
+            payBusy = false;
+        }
+        await refreshCart();
+        refreshAudit();
+    }
+
+    async function cancelCart() {
+        if (!cart) return;
+        const r = await fetch(`${CORE}/api/carts/${cart.cartId}/cancel`, { method: "POST", headers: userHeaders() });
+        addMsg("bot", r.ok ? "Cart cancelled and stock released." : "Could not cancel the cart.");
+        await refreshCart();
+        refreshAudit();
+    }
+
+    setInterval(() => {
+        if (!cart) { $("expiry").textContent = ""; return; }
+        const s = Math.max(0, Math.round((new Date(cart.expiresAt) - Date.now()) / 1000));
+        $("expiry").textContent = cart.status === "OPEN"
+            ? `expires in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : cart.status;
+    }, 1000);
+
+    $("send").onclick = send;
+    $("input").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+    $("pay").onclick = () => pay(false);
+    $("retry").onclick = () => pay(true);
+    $("cancel").onclick = cancelCart;
+
+    (async () => {
+        const r = await fetch(`${CORE}/api/session`, { method: "POST" });
+        session = await r.json();
+        addMsg("bot", 'Hi! Tell me what you need, for example: "Plan a cookout for 8 people under Rs 3000".');
+        refreshAudit();
+    })();
+</script>
+</body>
+</html>
