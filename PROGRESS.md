@@ -5,12 +5,14 @@
 - Phase 1: commerce core (schema + seed, catalog/stock read APIs, atomic reserve/release/commit SQL,
   carts with TTL + expiry job (SKIP LOCKED), policy guard, two-principal auth filter,
   audit log, idempotent checkout, cancel), 12 integration tests on Testcontainers Postgres
+- Phase 2:  FastAPI + LangGraph agent, provider-agnostic LLM client with retry/fallback, 
+  7 tools with pydantic validation, deterministic verify node, single-page UI 
 
 ## In progress
 - nothing (Checkpoint A reached)
 
 ## Next
-- Phase 2: agent service (FastAPI + LangGraph), minimal UI
+- Phase 3: security hardening (attack seeds, injection flagging, pytest with fake LLM)
 
 ## Known issues
 - Demo auth only (HMAC session token); rate limiter is in-memory
