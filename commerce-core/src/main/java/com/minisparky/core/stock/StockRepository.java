@@ -24,4 +24,25 @@ public class StockRepository {
                         rs.getInt("on_hand") - rs.getInt("reserved")),
                 sku, location).stream().findFirst();
     }
+
+    public boolean reserve(String sku, String location, int qty) {
+        return jdbc.update("""
+                UPDATE stock SET reserved = reserved + ?
+                WHERE sku = ? AND location_id = ? AND (on_hand - reserved) >= ?
+                """, qty, sku, location, qty) == 1;
+    }
+
+    public boolean release(String sku, String location, int qty) {
+        return jdbc.update("""
+                UPDATE stock SET reserved = reserved - ?
+                WHERE sku = ? AND location_id = ? AND reserved >= ?
+                """, qty, sku, location, qty) == 1;
+    }
+
+    public boolean commit(String sku, String location, int qty) {
+        return jdbc.update("""
+                UPDATE stock SET on_hand = on_hand - ?, reserved = reserved - ?
+                WHERE sku = ? AND location_id = ? AND reserved >= ?
+                """, qty, qty, sku, location, qty) == 1;
+    }
 }
