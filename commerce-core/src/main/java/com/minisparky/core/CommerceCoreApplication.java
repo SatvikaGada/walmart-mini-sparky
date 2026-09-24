@@ -4,13 +4,15 @@ import java.util.TimeZone;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@ConfigurationPropertiesScan
+@EnableScheduling
 public class CommerceCoreApplication {
 
 	public static void main(String[] args) {
-		// Windows JVMs on Indian locale report the legacy name "Asia/Calcutta",
-		// which the Postgres container rejects. Use the canonical name.
 		TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"));
 		SpringApplication.run(CommerceCoreApplication.class, args);
 	}
