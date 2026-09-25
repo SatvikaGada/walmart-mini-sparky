@@ -73,7 +73,7 @@ def run_task(core: httpx.Client, agent: httpx.Client, task: dict) -> dict:
         allow_empty = checks.get("allow_infeasible") and not items
         mark("min_items", len(items) >= checks["min_items"] or allow_empty)
     if checks.get("required_categories"):
-        cats = {core.get(f"/api/products/{i['sku']}").json()["category"] for i in items}
+        cats = {core.get(f"/api/products/{i['sku']}", headers={"X-User-Token": token}).json()["category"]for i in items}
         allow_empty = checks.get("allow_infeasible") and not items
         mark("required_categories", all(c in cats for c in checks["required_categories"]) or allow_empty)
     if checks.get("forbid_out_of_stock"):
