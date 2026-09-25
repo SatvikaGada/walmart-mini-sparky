@@ -35,6 +35,7 @@ public class PolicyGuard {
 
     public void checkAdd(int newQty, int maxQtyPerOrder, boolean newLine, int currentLines,
                          long newTotalPaise, Integer budgetPaise) {
+        if (props.policyGuardDisabled()) return;
         if (newQty > maxQtyPerOrder) {
             throw new ApiException(UNPROCESSABLE, "QTY_LIMIT", "Quantity exceeds the per-order limit",
                     Map.of("maxQtyPerOrder", maxQtyPerOrder, "requested", newQty));
@@ -47,6 +48,7 @@ public class PolicyGuard {
     }
 
     public void checkTotal(long totalPaise, Integer budgetPaise) {
+        if (props.policyGuardDisabled()) return;
         long limit = effectiveLimit(budgetPaise);
         if (totalPaise > limit) {
             throw new ApiException(UNPROCESSABLE, "BUDGET_EXCEEDED", "Cart total would exceed the budget",

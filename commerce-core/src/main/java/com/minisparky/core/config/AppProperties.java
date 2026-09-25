@@ -9,4 +9,5 @@ public record AppProperties(
         int cartTtlSeconds,
         int maxCartTotalPaise,
         int maxLinesPerCart,
-        int agentMaxCallsPerMinute) {}
+        int agentMaxCallsPerMinute,
+        boolean policyGuardDisabled) {}
