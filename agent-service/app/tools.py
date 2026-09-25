@@ -2,6 +2,7 @@
 import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Optional
+import logging
 
 import httpx
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, ValidationError
@@ -10,6 +11,8 @@ from . import config, sanitize
 
 POLICY_CODES = {"QTY_LIMIT", "LINE_LIMIT", "BUDGET_EXCEEDED", "CART_NOT_OPEN", "CART_EXPIRED",
                 "OUT_OF_STOCK", "RATE_LIMITED", "FORBIDDEN", "EMPTY_CART"}
+
+log = logging.getLogger("tools")
 
 
 def _norm_sku(v):
@@ -139,11 +142,17 @@ async def _details(ctx: ToolContext, a: SkuArgs) -> dict:
     if r.status_code != 200:
         return _err(r)
     p = r.json()
-    return {"sku": p["sku"], "name": sanitize.clean(p["name"], 50), "price_rs": _rs(p["pricePaise"]),
-            "in_stock": p["available"], "max_qty": p["maxQtyPerOrder"],
-            "description": sanitize.wrap(p["description"], 300),
-            "reviews": [{"author": sanitize.clean(rv["author"], 30), "text": sanitize.wrap(rv["body"], 200)}
-                        for rv in p["reviews"][:5]]}
+    flags = set(sanitize.flag(sanitize.clean(p["description"], 2000)))
+    for rv in p["reviews"][:5]:
+        flags.update(sanitize.flag(sanitize.clean(rv["body"], 2000)))
+    result = {"sku": p["sku"], "name": sanitize.clean(p["name"], 50), "price_rs": _rs(p["pricePaise"]),
+              "in_stock": p["available"], "max_qty": p["maxQtyPerOrder"],
+              "description": sanitize.wrap(p["description"], 300),
+              "reviews": [{"author": sanitize.clean(rv["author"], 30), "text": sanitize.wrap(rv["body"], 200)}
+                          for rv in p["reviews"][:5]]}
+    if flags:
+        result["_flags"] = sorted(flags)
+    return result
 
 
 async def _stock(ctx: ToolContext, a: SkuArgs) -> dict:
@@ -234,7 +243,11 @@ async def run_tool(name: str, raw_args: Any, ctx: ToolContext) -> tuple[str, dic
                 result = await fn(ctx, parsed)
             except httpx.HTTPError as e:
                 result = {"error": "CORE_UNAVAILABLE", "message": type(e).__name__}
+    flags = result.pop("_flags", None) if isinstance(result, dict) else None
     content = json.dumps(result, separators=(",", ":"), ensure_ascii=False)
     entry["status"] = _status(result)
     entry["result"] = content[:240]
+    if flags:
+        entry["flags"] = flags
+        log.warning("possible prompt injection in tool result: %s %s", name, flags)
     return content, entry
