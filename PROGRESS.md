@@ -11,13 +11,15 @@
   (V3 migration: 4 malicious descriptions + 6 malicious reviews), 14 pytest tests with a
   fake LLM and a fake backend (no Docker needed), 5 manual injection attempts against the
   live agent + UI
+- Phase 4: 30-task evaluation harness (12 normal, 4 stock, 4 budget, 10 injection); verifies
+  cart totals and items from the backend's real state, not from the LLM's reply; guard-on vs
+  guard-off ablation isolating the PolicyGuard's contribution
 
 ## In progress
 - nothing (Checkpoint A reached)
 
 ## Next
-- Phase 4: evaluation harness (tasks.yaml, run_eval.py, results table, guard-off ablation)
-
+- Phase 5: polish — README, k6 flash-sale load test, GitHub Actions CI, JaCoCo badge, git tag v1.0
 ## Known issues
 - Demo auth only (HMAC session token); rate limiter is in-memory
 - Failed checkouts are not stored under their idempotency key (retry re-executes)
